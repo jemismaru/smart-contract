@@ -73,6 +73,7 @@ pub mod nft_com_auction {
             listing_id: listing_id.clone(),
             highest_bid: 0,
             highest_bidder: Pubkey::default(),
+            bids: std::collections::HashMap::new(), // Initialize bids
             minimum_bid: minimum,
             end_time,
             fees: 0,
@@ -81,7 +82,10 @@ pub mod nft_com_auction {
             is_alien: false,
             total_amount: 0,
             owner,
-            bidders: vec![],
+            bidders: vec![], // Initialize empty list of bidders
+            active_auctions: std::collections::HashMap::new(), // Initialize empty active auctions
+            past_auctions: std::collections::HashMap::new(), // Initialize empty past auctions
+            pending_withdrawals: std::collections::HashMap::new(),
         };
 
         auction_state.auctions.insert(listing_id.clone(), auction);
@@ -322,66 +326,106 @@ pub mod nft_com_auction {
         Ok(())
     }
 
-    pub fn get_highest_bidder(ctx: Context<GetHighestBidder>, listing_id: String) -> Pubkey {
+    pub fn get_highest_bidder(
+        ctx: Context<GetHighestBidder>,
+        listing_id: String
+    ) -> Result<Pubkey> {
         let auction_state = &ctx.accounts.auction_state;
-        auction_state.highest_bidder
+
+        // Attempt to retrieve the auction details by listing_id
+        match auction_state.auctions.get(&listing_id) {
+            Some(auction) => Ok(auction.highest_bidder), // Return the highest_bidder if found
+            None => Err(ErrorCode::InvalidListingId.into()), // Return an error if auction not found
+        }
     }
 
-    pub fn get_auction_end_time(ctx: Context<GetAuctionEndTime>, listing_id: String) -> i64 {
+    pub fn get_auction_end_time(
+        ctx: Context<GetAuctionEndTime>,
+        listing_id: String
+    ) -> Result<i64> {
         let auction_state = &ctx.accounts.auction_state;
-        auction_state.end_time
+
+        // Attempt to retrieve the auction details by listing_id
+        match auction_state.auctions.get(&listing_id) {
+            Some(auction) => Ok(auction.end_time), // Return the end_time if found
+            None => Err(ErrorCode::InvalidListingId.into()), // Return an error if auction not found
+        }
     }
 
-    pub fn has_auction_ended(ctx: Context<HasAuctionEnded>, listing_id: String) -> bool {
+    pub fn has_auction_ended(ctx: Context<HasAuctionEnded>, listing_id: String) -> Result<bool> {
         let auction_state = &ctx.accounts.auction_state;
-        auction_state.ended
+
+        // Attempt to retrieve the auction details by listing_id
+        match auction_state.auctions.get(&listing_id) {
+            Some(auction) => Ok(auction.ended), // Return true/false based on ended status
+            None => Err(ErrorCode::InvalidListingId.into()), // Return an error if auction not found
+        }
     }
 
-    pub fn get_active_auctions_of(ctx: Context<GetActiveAuctionsOf>, owner: Pubkey) -> Vec<String> {
+    pub fn get_active_auctions_of(
+        ctx: Context<GetActiveAuctionsOf>,
+        owner: Pubkey
+    ) -> Result<Vec<String>> {
         let auction_data = &ctx.accounts.auction_data;
 
-        auction_data.active_auctions
-            .get(&owner)
-            .unwrap_or(&vec![])
-            .clone()
+        // Attempt to retrieve the active auctions for the given owner
+        match auction_data.active_auctions.get(&owner) {
+            Some(auctions) => Ok(auctions.clone()), // Return the active auctions if found
+            None => Ok(vec![]), // Return an empty vector if no active auctions are found
+        }
     }
 
     // Function to get past auctions for an owner
-    pub fn get_past_auctions_of(ctx: Context<GetPastAuctionsOf>, owner: Pubkey) -> Vec<String> {
+    pub fn get_past_auctions_of(
+        ctx: Context<GetPastAuctionsOf>,
+        owner: Pubkey
+    ) -> Result<Vec<String>> {
         let auction_data = &ctx.accounts.auction_data;
 
-        auction_data.past_auctions
-            .get(&owner)
-            .unwrap_or(&vec![])
-            .clone()
+        // Attempt to retrieve the past auctions for the given owner
+        match auction_data.past_auctions.get(&owner) {
+            Some(auctions) => Ok(auctions.clone()), // Return the past auctions if found
+            None => Ok(vec![]), // Return an empty vector if no past auctions are found
+        }
     }
 
     // Function to get pending withdrawals for an owner
-    pub fn get_pending_withdrawals(ctx: Context<GetPendingWithdrawals>, address: Pubkey) -> u64 {
+    pub fn get_pending_withdrawals(
+        ctx: Context<GetPendingWithdrawals>,
+        address: Pubkey
+    ) -> Result<u64> {
         let auction_data = &ctx.accounts.auction_data;
 
-        *auction_data.pending_withdrawals.get(&address).unwrap_or(&0)
+        // Attempt to retrieve the pending withdrawals for the given address
+        match auction_data.pending_withdrawals.get(&address) {
+            Some(&amount) => Ok(amount), // Return the pending withdrawal amount if found
+            None => Ok(0), // Return 0 if no pending withdrawals are found
+        }
     }
 
-    pub fn get_bid_amount(ctx: Context<GetBidAmount>, listing_id: String, bidder: Pubkey) -> u64 {
+    pub fn get_bid_amount(
+        ctx: Context<GetBidAmount>,
+        listing_id: String,
+        bidder: Pubkey
+    ) -> Result<u64> {
         let auction = &ctx.accounts.auction;
 
         // Check if the bidder exists in the bids mapping
         if let Some(bid) = auction.bids.get(&bidder) {
-            bid.amount
+            Ok(bid.amount) // Return the bid amount if found
         } else {
-            0 // Return 0 if no bid exists for the bidder
+            Ok(0) // Return 0 if no bid exists for the bidder
         }
     }
 
     pub fn get_auction_details(
         ctx: Context<GetAuctionDetails>,
         listing_id: String
-    ) -> AuctionDetailsResponse {
+    ) -> Result<AuctionDetailsResponse> {
         let auction = &ctx.accounts.auction;
 
         // Create and return an AuctionDetailsResponse struct
-        AuctionDetailsResponse {
+        let response = AuctionDetailsResponse {
             listing_id: auction.listing_id.clone(),
             highest_bid: auction.highest_bid,
             highest_bidder: auction.highest_bidder,
@@ -391,17 +435,20 @@ pub mod nft_com_auction {
             end_time: auction.end_time,
             bidders: auction.bidders.clone(),
             num_bidders: auction.bidders.len() as u64,
-        }
+        };
+
+        Ok(response) // Return the response wrapped in Ok
     }
 
     pub fn get_pending_withdrawal_amount(
         ctx: Context<GetPendingWithdrawalAmount>,
         owner: Pubkey
-    ) -> u64 {
+    ) -> Result<u64> {
         let auction_details = &ctx.accounts.auction_details;
 
-        // Retrieve the pending withdrawal amount for the owner
-        *auction_details.pending_withdrawals.get(&owner).unwrap_or(&0)
+        // Attempt to retrieve the pending withdrawal amount for the given owner
+        let amount = auction_details.pending_withdrawals.get(&owner).copied().unwrap_or(0);
+        Ok(amount) // Return the amount wrapped in Ok
     }
 
     pub fn get_highest_bid_and_end_time(
@@ -482,6 +529,7 @@ pub struct NftComAuction {
     pub active_bids: HashMap<Pubkey, Vec<String>>,
     pub buyer_fee: u64,
     pub seller_fee: u64,
+    pub nft_contract: Pubkey,
 }
 
 #[event]
@@ -691,4 +739,8 @@ pub enum ErrorCode {
     InvalidListingId,
     #[msg("Auction has not ended yet.")]
     AuctionNotEnded,
+    #[msg("The bid must be greater than zero.")]
+    MinimumBidError,
+    #[msg("End time must be in the future.")]
+    EndTimeError,
 }
